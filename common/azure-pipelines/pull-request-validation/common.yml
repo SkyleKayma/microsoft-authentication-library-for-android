@@ -1,0 +1,99 @@
+# File: azure-pipelines\pull-request-validation\common.yml
+# Variable: 'MOCK_API_URL' was defined in the Variables tab
+# Description: Assemble and run unit test
+name: $(date:yyyyMMdd)$(rev:.r)
+
+variables:
+  - group: devex-ciam-test
+
+trigger:
+  branches:
+    include:
+    - dev
+    - master
+    - release/*
+  batch: True
+
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: dev
+
+pool:
+  name: Hosted Windows 2019 with VS2019
+
+jobs:
+- job: build_test
+  displayName: Build & Test
+  cancelTimeoutInMinutes: 1
+  variables:
+    Codeql.Enabled: true
+  steps:
+  - checkout: self
+    clean: true
+    submodules: recursive
+    persistCredentials: True
+  - template: ../templates/steps/automation-cert.yml
+  - task: CmdLine@1
+    displayName: Set Office MVN Access Token in Environment
+    inputs:
+      filename: echo
+      arguments: '##vso[task.setvariable variable=ENV_VSTS_MVN_ANDROIDCOMMON_ACCESSTOKEN]$(System.AccessToken)'
+  - task: CodeQL3000Init@0
+  - task: Gradle@3
+    name: Gradle3   
+    displayName: Assemble Local
+    inputs:
+      javaHomeSelection: JDKVersion
+      jdkVersionOption: "1.11"
+      tasks: clean common:assembleLocal
+      publishJUnitResults: false
+      jdkArchitecture: x64
+      sqAnalysisEnabled: false
+  - task: CodeQL3000Finalize@0
+  - task: Gradle@2
+    displayName: Run Unit tests
+    inputs:
+      javaHomeSelection: JDKVersion
+      jdkVersionOption: "1.11"
+      tasks: common:testLocalDebugUnitTest -PlabSecret=$(LabVaultAppCert) -PmockApiUrl=$(MOCK_API_URL) 
+  - task: Gradle@3
+    displayName: Check Dependencies size
+    condition: eq(variables['system.pullRequest.targetBranch'], 'dev')
+    inputs:
+      tasks: common:dependenciesSizeCheck -PdependenciesSizeCheckConfig=distReleaseRuntimeClasspath
+      jdkVersionOption: "1.11"
+
+- job: spotbugs
+  displayName: SpotBugs
+  cancelTimeoutInMinutes: 1
+  steps:
+  - checkout: self
+    clean: true
+    submodules: recursive
+    persistCredentials: True
+  - template: ../templates/steps/spotbugs.yml
+    parameters:
+      project: common
+- job: lint
+  displayName: Lint
+  cancelTimeoutInMinutes: 1
+  steps:
+  - checkout: self
+    clean: true
+    submodules: recursive
+    persistCredentials: True
+  - task: CmdLine@1
+    displayName: Set Office MVN Access Token in Environment
+    inputs:
+      filename: echo
+      arguments: '##vso[task.setvariable variable=ENV_VSTS_MVN_ANDROIDCOMMON_ACCESSTOKEN]$(System.AccessToken)'
+  - task: Gradle@3
+    displayName: Lint
+    inputs:
+      tasks: clean common:lintLocalDebug
+      publishJUnitResults: false
+      javaHomeSelection: JDKVersion
+      jdkVersionOption: "1.11"
+...

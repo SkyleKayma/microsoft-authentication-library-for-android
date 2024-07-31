@@ -1,0 +1,213 @@
+plugins {
+    id 'com.android.library'
+    id 'maven-publish'
+}
+
+apply from: '../versioning/version_tasks.gradle'
+
+project.ext.vstsUsername = System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_USERNAME") != null ? System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_USERNAME") : project.findProperty("vstsUsername")
+project.ext.vstsPassword = System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_ACCESSTOKEN") != null ? System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_ACCESSTOKEN") : project.findProperty("vstsMavenAccessToken")
+
+
+android {
+
+    testOptions {
+        compileOptions {
+            // Flag to enable support for the new language APIs
+            coreLibraryDesugaringEnabled true
+            // Sets Java compatibility to Java 8
+            sourceCompatibility JavaVersion.VERSION_1_8
+            targetCompatibility JavaVersion.VERSION_1_8
+        }
+        dependencies {
+            coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:$rootProject.ext.coreLibraryDesugaringVersion"
+        }
+        animationsDisabled = true
+    }
+
+    //Commenting out until the next major version of common/msal/etc...
+    /*
+    compileOptions {
+        // Flag to enable support for the new language APIs
+        coreLibraryDesugaringEnabled true
+        // Sets Java compatibility to Java 8
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    */
+
+
+    compileSdk rootProject.ext.compileSdkVersion
+
+    boolean usePreInstalledApks = project.hasProperty("preferPreInstalledApks")
+
+    boolean preInstallLtw = project.hasProperty("preInstallLtw")
+    boolean sendPowerLiftLogs = project.hasProperty("sendPowerLiftLogs")
+
+    def final appSourcePlayStore = "PlayStore"
+    def final appSourceLocalApk = "LocalApk"
+
+    // defaults to LocalApkFile - the file must be pushed to the device before tests
+    def brokerInstallationSource = appSourceLocalApk
+
+    def brokerUpdationSource = appSourceLocalApk
+
+    def wordAppInstallationSource = appSourceLocalApk
+
+    if (project.hasProperty("brokerSource")) {
+        if (brokerSource.equalsIgnoreCase(appSourcePlayStore)) {
+            brokerInstallationSource = appSourcePlayStore
+        } else if (brokerSource.equalsIgnoreCase(appSourceLocalApk)) {
+            brokerInstallationSource = appSourceLocalApk
+        } else {
+            throw new InvalidUserDataException("Unspported broker source provided: "
+                    + brokerSource
+                    + " Only the following broker sources are supported: PlayStore , LocalApk");
+        }
+    }
+
+    if (project.hasProperty("brokerUpdateSource")) {
+        if (brokerUpdateSource.equalsIgnoreCase(appSourcePlayStore)) {
+            brokerUpdationSource = appSourcePlayStore
+        } else if (brokerUpdateSource.equalsIgnoreCase(appSourceLocalApk)) {
+            brokerUpdationSource = appSourceLocalApk
+        } else {
+            throw new InvalidUserDataException("Unspported update broker source provided: "
+                    + brokerUpdateSource
+                    + " Only the following broker sources are supported: PlayStore , LocalApk");
+        }
+    }
+
+    if (project.hasProperty("wordAppSource")) {
+        if (wordAppSource.equalsIgnoreCase(appSourcePlayStore)) {
+            wordAppInstallationSource = appSourcePlayStore
+        } else if (wordAppSource.equalsIgnoreCase(appSourceLocalApk)) {
+            wordAppInstallationSource = appSourceLocalApk
+        } else {
+            throw new InvalidUserDataException("Unsupported word app source provided: "
+                    + wordAppSource
+                    + " Only the following wordAppSource sources are supported: PlayStore , LocalApk");
+        }
+    }
+
+    defaultConfig {
+        multiDexEnabled true
+        minSdkVersion rootProject.ext.automationAppMinSDKVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "BROKER_INSTALL_SOURCE", "\"$brokerInstallationSource\"")
+        buildConfigField("String", "BROKER_UPDATE_SOURCE", "\"$brokerUpdationSource\"")
+        buildConfigField("String", "WORD_APP_INSTALL_SOURCE", "\"$wordAppInstallationSource\"")
+        buildConfigField("String", "INSTALL_SOURCE_PLAY_STORE", "\"$appSourcePlayStore\"")
+        buildConfigField("String", "INSTALL_SOURCE_LOCAL_APK", "\"$appSourceLocalApk\"")
+        buildConfigField("String", "UPDATE_SOURCE_PLAY_STORE", "\"$appSourcePlayStore\"")
+        buildConfigField("String", "UPDATE_SOURCE_LOCAL_APK", "\"$appSourceLocalApk\"")
+        buildConfigField("boolean", "PREFER_PRE_INSTALLED_APKS", "$usePreInstalledApks")
+        buildConfigField("boolean", "PRE_INSTALL_LTW", "$preInstallLtw")
+        buildConfigField("boolean", "SEND_POWERLIFT_LOGS", "$sendPowerLiftLogs")
+
+        // Specifies a sorted list of flavors that the plugin should try to use from
+        // a given dimension. The following tells the plugin that, when encountering
+        // a dependency that includes a "main" dimension, it should select the
+        // "local" flavor. You can include additional flavor names to provide a
+        // sorted list of fallbacks for the dimension.
+        missingDimensionStrategy 'main', 'local'
+    }
+
+    buildTypes {
+        debug {
+            testCoverageEnabled false
+            debuggable true
+        }
+        release {
+            testCoverageEnabled false
+            minifyEnabled false
+            debuggable false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+}
+
+
+task sourcesJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier 'sources'
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name == 'assembleDebug' || task.name == 'assembleRelease') {
+        task.dependsOn 'sourcesJar'
+    }
+}
+
+project.afterEvaluate{
+    publishing {
+        publications {
+            aar(MavenPublication) {
+                artifact "$buildDir/outputs/aar/uiautomationutilities-release.aar"
+                artifact sourcesJar
+                groupId 'com.microsoft.identity'
+                artifactId = 'uiautomationutilities'
+                version = getAppVersionName()
+
+                pom.withXml {
+
+                    // Dependencies
+                    def dependenciesNode = asNode().appendNode('dependencies')
+
+                    //Iterate over the implementation dependencies (we don't want the test ones), adding a <dependency> node for each
+                    configurations.implementation.allDependencies.each {
+                        if (it.group != null && it.name != null) {
+                            def dependencyNode = dependenciesNode.appendNode('dependency')
+                            dependencyNode.appendNode('groupId', it.group)
+                            dependencyNode.appendNode('artifactId', it.name)
+                            dependencyNode.appendNode('version', it.version)
+                        }
+                    }
+                }
+            }
+        }
+
+        repositories {
+            maven {
+                name "vsts-maven-adal-android"
+                url "https://identitydivision.pkgs.visualstudio.com/_packaging/AndroidADAL/maven/v1"
+                credentials {
+                    username project.ext.vstsUsername
+                    password project.ext.vstsPassword
+                }
+            }
+            maven {
+                name "vsts-maven-android"
+                url 'https://identitydivision.pkgs.visualstudio.com/IDDP/_packaging/Android/maven/v1'
+                credentials {
+                    username project.vstsUsername
+                    password project.vstsPassword
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+    //Commenting out until the next major version of common/msal/etc...
+    //Java 8 - Desugaring
+    //coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:$rootProject.ext.coreLibraryDesugaringVersion"
+
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation "androidx.appcompat:appcompat:$rootProject.ext.appCompatVersion"
+    implementation 'junit:junit:4.13'
+    implementation "androidx.test.uiautomator:uiautomator:$rootProject.ext.uiAutomatorVersion"
+    implementation "androidx.test:monitor:$rootProject.ext.androidxTestMonitorVersion"
+    implementation "androidx.test:core:$rootProject.ext.androidxTestCoreVersion"
+    implementation(project(":LabApiUtilities"))
+    implementation "com.google.code.gson:gson:$rootProject.ext.gsonVersion"
+    implementation project(path: ':common4j')
+    compileOnly "org.projectlombok:lombok:$rootProject.ext.lombokVersion"
+    annotationProcessor "org.projectlombok:lombok:$rootProject.ext.lombokVersion"
+    androidTestImplementation "androidx.test:runner:$rootProject.ext.androidxTestRunnerVersion"
+}
