@@ -29,12 +29,6 @@ codeCoverageReport {
     coverage.enabled = enableCodeCoverage
 }
 
-// In dev, we want to keep the dependencies(common4j, broker4j, common) to 1.0.+ to be able to be consumed by daily dev pipeline.
-// In release/*, we change these to specific versions being consumed.
-def common4jVersion = "1.0.+"
-if (project.hasProperty("distCommon4jVersion") && project.distCommon4jVersion != '') {
-    common4jVersion = project.distCommon4jVersion
-}
 
 boolean newBrokerDiscoveryEnabledFlag = project.hasProperty("newBrokerDiscoveryEnabledFlag")
 boolean trustDebugBrokerFlag = project.hasProperty("trustDebugBrokerFlag")
@@ -50,7 +44,7 @@ android {
         versionCode getAppVersionCode()
         versionName getAppVersionName()
         project.archivesBaseName = "common"
-        project.version = android.defaultConfig.versionName
+        project.version = getAppVersionName()
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         //Languages Common supports.
         resConfigs "en", "ar", "b+sr+Latn", "bg", "ca", "cs", "da", "de", "el", "es", "et",
@@ -215,34 +209,6 @@ dependencies {
     implementation "androidx.fragment:fragment:1.3.2"
 }
 
-// Create tasks to generate javadoc
-android.libraryVariants.all { variant ->
-    task("${variant.name}Javadoc", type: Javadoc, dependsOn: "assemble${variant.name.capitalize()}") {
-        source = variant.javaCompileProvider.get().source
-
-        title = "Microsoft Identity Android Common"
-
-        // First add all of your dependencies to the classpath, then add the android jars
-        doFirst { classpath += files(variant.javaCompiler.classpath.files) }
-        classpath += files(android.getBootClasspath())
-
-        options.memberLevel = JavadocMemberLevel.PUBLIC
-        options.addBooleanOption('Xdoclint:none', true)
-
-        // We're excluding these generated files
-        exclude '**/R.java'
-    }
-}
-
-// Create tasks to generate javadoc jar
-android.libraryVariants.all { variant ->
-    task("${variant.name}JavadocJar", type: Jar, dependsOn: "${variant.name}Javadoc") {
-        classifier 'javadoc'
-        from tasks["${variant.name}Javadoc"].destinationDir
-    }
-}
-
-
 tasks.register('sourcesJar', Jar) {
     from android.sourceSets.main.java.srcDirs
     classifier 'sources'
@@ -339,12 +305,9 @@ afterEvaluate {
         // Repositories to which Gradle can publish artifacts
         repositories {
             maven {
-                name "vsts-maven-adal-android"
-                url "https://identitydivision.pkgs.visualstudio.com/_packaging/AndroidADAL/maven/v1"
-                credentials {
-                    username System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_USERNAME") != null ? System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_USERNAME") : project.findProperty("vstsUsername")
-                    password System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_ACCESSTOKEN") != null ? System.getenv("ENV_VSTS_MVN_ANDROIDCOMMON_ACCESSTOKEN") : project.findProperty("vstsMavenAccessToken")
-                }
+                name = "openium"
+                url = uri("https://maven.openium.fr/releases")
+                credentials(PasswordCredentials)
             }
         }
     }
